@@ -1,0 +1,31 @@
+name: recruiter-ai-backend
+services:
+- name: api
+  github:
+    branch: main
+    deploy_on_push: true
+    repo: dalefrieswthat/recruiter-ai
+  source_dir: web/backend
+  dockerfile_path: Dockerfile
+  envs:
+  - key: DO_SPACES_ENDPOINT
+    scope: RUN_TIME
+    type: SECRET
+  - key: DO_SPACES_KEY
+    scope: RUN_TIME
+    type: SECRET
+  - key: DO_SPACES_SECRET
+    scope: RUN_TIME
+    type: SECRET
+  - key: DO_SPACES_BUCKET
+    scope: RUN_TIME
+    type: SECRET
+  - key: DO_SPACES_REGION
+    scope: RUN_TIME
+    type: SECRET
+  - key: DIGITALOCEAN_TOKEN
+    scope: RUN_TIME
+    type: SECRET
+  - key: DO_AI_AGENT_ID
+    scope: RUN_TIME
+    type: SECRET 

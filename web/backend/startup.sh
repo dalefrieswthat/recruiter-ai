@@ -1,11 +1,4 @@
 #!/bin/bash
 
-# Startup script for the backend server
-
-# Activate the root virtual environment
-echo "Activating the root virtual environment..."
-source ../../venv/bin/activate
-
-# Start the backend server
-echo "Starting the backend server..."
-uvicorn main:app --reload --port 8000 
+# Start the FastAPI application with uvicorn
+exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4 

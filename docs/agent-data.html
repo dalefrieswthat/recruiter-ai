@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Candidate Data for DigitalOcean Agent</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+        }
+        h1, h2, h3 { 
+            color: #031B4E;
+        }
+        .data-section {
+            margin-bottom: 30px;
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
+            padding: 20px;
+            background-color: white;
+        }
+        .metric {
+            display: inline-block;
+            margin-right: 40px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #0061EB;
+        }
+        .metric-label {
+            font-size: 14px;
+            color: #586069;
+        }
+        pre {
+            background-color: #f6f8fa;
+            border-radius: 6px;
+            padding: 16px;
+            overflow: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        table, th, td {
+            border: 1px solid #e1e4e8;
+        }
+        th, td {
+            padding: 8px 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #f6f8fa;
+        }
+        .status {
+            padding: 8px;
+            border-radius: 4px;
+            background-color: #def;
+            display: inline-block;
+            margin-bottom: 20px;
+        }
+        .chart-container {
+            width: 100%;
+            height: 300px;
+            margin-top: 20px;
+        }
+    </style>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <h1>Candidate Data for DigitalOcean Agent</h1>
+    <p class="status" id="statusIndicator">Loading data...</p>
+    
+    <div class="data-section">
+        <h2>Overall Assessment</h2>
+        <div id="overallMetrics"></div>
+    </div>
+    
+    <div class="data-section">
+        <h2>Technical Skills</h2>
+        <div id="skillsChart" class="chart-container"></div>
+    </div>
+    
+    <div class="data-section">
+        <h2>Education</h2>
+        <div id="educationSection">
+            <table id="educationTable">
+                <thead>
+                    <tr>
+                        <th>Degree</th>
+                        <th>Institution</th>
+                        <th>Start Date</th>
+                        <th>End Date</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+    
+    <div class="data-section">
+        <h2>Experience</h2>
+        <div id="experienceSection">
+            <table id="experienceTable">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Company</th>
+                        <th>Start Date</th>
+                        <th>End Date</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+    
+    <div class="data-section">
+        <h2>Complete JSON Data</h2>
+        <pre id="jsonData">Loading...</pre>
+    </div>
+    
+    <script>
+        // Global data store
+        window.candidateData = null;
+        
+        // Function to fetch and display the data
+        async function fetchCandidateData() {
+            try {
+                // Define all the endpoints we want to fetch
+                const endpoints = [
+                    '/api/agent/comprehensive-data',
+                    '/api/agent/candidate',
+                    '/api/visualization-data'
+                ];
+                
+                // Start all fetches in parallel
+                const responses = await Promise.allSettled(
+                    endpoints.map(endpoint => 
+                        fetch(`http://localhost:8000${endpoint}`)
+                            .then(response => {
+                                if (!response.ok) {
+                                    throw new Error(`HTTP error! Status: ${response.status}`);
+                                }
+                                return response.json();
+                            })
+                    )
+                );
+                
+                // Process successful responses
+                let comprehensiveData = null;
+                let candidateData = null;
+                let visualizationData = null;
+                
+                responses.forEach((result, index) => {
+                    if (result.status === 'fulfilled') {
+                        if (index === 0) comprehensiveData = result.value;
+                        if (index === 1) candidateData = result.value;
+                        if (index === 2) visualizationData = result.value;
+                    } else {
+                        console.error(`Failed to fetch ${endpoints[index]}: ${result.reason}`);
+                    }
+                });
+                
+                // Use the first available data
+                const data = comprehensiveData || candidateData;
+                if (!data) {
+                    document.getElementById('statusIndicator').textContent = 'Error: Failed to load data';
+                    document.getElementById('statusIndicator').style.backgroundColor = '#fdd';
+                    return;
+                }
+                
+                // Store data globally
+                window.candidateData = data;
+                window.CANDIDATE_DATA = data;
+                
+                // Update status indicator
+                document.getElementById('statusIndicator').textContent = 'Data loaded successfully';
+                document.getElementById('statusIndicator').style.backgroundColor = '#dfd';
+                
+                // Update metrics
+                updateOverallMetrics(data);
+                
+                // Update education table
+                if (data.education) {
+                    updateEducationTable(data.education);
+                }
+                
+                // Update experience table
+                if (data.experience) {
+                    updateExperienceTable(data.experience);
+                }
+                
+                // Use visualization data for skills chart if available
+                if (visualizationData && visualizationData.skills) {
+                    createSkillsChart(visualizationData.skills);
+                } else if (data.skills) {
+                    // Convert skills to format needed for the chart
+                    const skillsData = Object.entries(data.skills).map(([skill, score]) => ({
+                        skill,
+                        score,
+                        category: 'Technical'
+                    }));
+                    createSkillsChart(skillsData);
+                }
+                
+                // Show complete JSON data
+                document.getElementById('jsonData').textContent = JSON.stringify(data, null, 2);
+                
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                document.getElementById('statusIndicator').textContent = `Error: ${error.message}`;
+                document.getElementById('statusIndicator').style.backgroundColor = '#fdd';
+            }
+        }
+        
+        // Function to update overall metrics
+        function updateOverallMetrics(data) {
+            const metricsContainer = document.getElementById('overallMetrics');
+            metricsContainer.innerHTML = '';
+            
+            // Define metrics to display
+            const metrics = [
+                { key: 'overall_fit_score', label: 'Overall Score' },
+                { key: 'experience_level', label: 'Experience' },
+                { key: 'education_score', label: 'Education' },
+                { key: 'cultural_fit', label: 'Cultural Fit' }
+            ];
+            
+            // Create metric elements
+            metrics.forEach(metric => {
+                let value = data[metric.key];
+                
+                // Handle nested structure
+                if (!value && data.status === 'success') {
+                    value = data.overall_fit_score;
+                }
+                
+                // Format numeric values
+                if (typeof value === 'number') {
+                    value = Math.round(value);
+                }
+                
+                const metricDiv = document.createElement('div');
+                metricDiv.className = 'metric';
+                metricDiv.innerHTML = `
+                    <div class="metric-value">${value || 'N/A'}</div>
+                    <div class="metric-label">${metric.label}</div>
+                `;
+                metricsContainer.appendChild(metricDiv);
+            });
+        }
+        
+        // Function to update education table
+        function updateEducationTable(education) {
+            const tbody = document.querySelector('#educationTable tbody');
+            tbody.innerHTML = '';
+            
+            if (education.length === 0) {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td colspan="4">No education data available</td>';
+                tbody.appendChild(row);
+                return;
+            }
+            
+            education.forEach(edu => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${edu.degree || 'Unknown'}</td>
+                    <td>${edu.institution || 'Unknown'}</td>
+                    <td>${edu.start_date || ''}</td>
+                    <td>${edu.end_date || ''}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        // Function to update experience table
+        function updateExperienceTable(experience) {
+            const tbody = document.querySelector('#experienceTable tbody');
+            tbody.innerHTML = '';
+            
+            if (experience.length === 0) {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td colspan="5">No experience data available</td>';
+                tbody.appendChild(row);
+                return;
+            }
+            
+            experience.forEach(exp => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${exp.title || 'Unknown'}</td>
+                    <td>${exp.company || 'Unknown'}</td>
+                    <td>${exp.start_date || ''}</td>
+                    <td>${exp.end_date || ''}</td>
+                    <td>${exp.description || ''}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        // Function to create skills chart using D3.js
+        function createSkillsChart(skills) {
+            if (!skills || skills.length === 0) {
+                document.getElementById('skillsChart').innerHTML = '<p>No skills data available</p>';
+                return;
+            }
+            
+            // Clear previous chart
+            d3.select('#skillsChart').html('');
+            
+            // Set up dimensions
+            const width = document.getElementById('skillsChart').clientWidth;
+            const height = 300;
+            const margin = { top: 20, right: 30, bottom: 40, left: 40 };
+            const chartWidth = width - margin.left - margin.right;
+            const chartHeight = height - margin.top - margin.bottom;
+            
+            // Create SVG
+            const svg = d3.select('#skillsChart')
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height)
+                .append('g')
+                .attr('transform', `translate(${margin.left},${margin.top})`);
+            
+            // Create scales
+            const x = d3.scaleBand()
+                .domain(skills.map(d => d.skill))
+                .range([0, chartWidth])
+                .padding(0.2);
+            
+            const y = d3.scaleLinear()
+                .domain([0, 10])
+                .range([chartHeight, 0]);
+            
+            // Create color scale
+            const color = d3.scaleOrdinal()
+                .domain(['programming_languages', 'frameworks', 'cloud_and_devops', 'tools', 'Technical'])
+                .range(['#0061EB', '#00B19F', '#7B61FF', '#FF6B4A', '#FFB700']);
+            
+            // Create bars
+            svg.selectAll('.bar')
+                .data(skills)
+                .enter()
+                .append('rect')
+                .attr('class', 'bar')
+                .attr('x', d => x(d.skill))
+                .attr('y', d => y(d.score))
+                .attr('width', x.bandwidth())
+                .attr('height', d => chartHeight - y(d.score))
+                .attr('fill', d => color(d.category));
+            
+            // Add labels
+            svg.selectAll('.label')
+                .data(skills)
+                .enter()
+                .append('text')
+                .attr('class', 'label')
+                .attr('x', d => x(d.skill) + x.bandwidth() / 2)
+                .attr('y', d => y(d.score) - 5)
+                .attr('text-anchor', 'middle')
+                .attr('font-size', '10px')
+                .text(d => d.score);
+            
+            // Add axes
+            svg.append('g')
+                .attr('transform', `translate(0,${chartHeight})`)
+                .call(d3.axisBottom(x))
+                .selectAll('text')
+                .attr('transform', 'rotate(-45)')
+                .attr('text-anchor', 'end')
+                .attr('dx', '-.8em')
+                .attr('dy', '.15em')
+                .attr('font-size', '10px');
+            
+            svg.append('g')
+                .call(d3.axisLeft(y));
+            
+            // Add title
+            svg.append('text')
+                .attr('x', chartWidth / 2)
+                .attr('y', -5)
+                .attr('text-anchor', 'middle')
+                .text('Candidate Skills Assessment');
+        }
+        
+        // Fetch data on page load
+        fetchCandidateData();
+        
+        // Expose a global function that can be called to get the data
+        window.getCandidateData = function() {
+            return window.candidateData;
+        };
+        
+        // Refresh data periodically
+        setInterval(fetchCandidateData, 30000);
+    </script>
+</body>
+</html> 

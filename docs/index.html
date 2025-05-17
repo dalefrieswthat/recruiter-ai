@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Resume Analysis</title>
+    <script>
+        window.API_CONFIG = {
+            BASE_URL: 'YOUR_BACKEND_URL_HERE' // Replace this with your actual backend URL when deploying
+        };
+    </script>
+    <style>
+        :root {
+            --pastel-blue: #B8D8E3;
+            --pastel-green: #C8E6C9;
+            --pastel-pink: #F8BBD0;
+            --pastel-purple: #D1C4E9;
+            --pastel-yellow: #FFF3B0;
+            --pastel-error: #FFCDD2;
+            --text-primary: #37474F;
+            --text-secondary: #546E7A;
+            --shadow-color: rgba(0, 0, 0, 0.05);
+        }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, var(--pastel-purple) 0%, var(--pastel-blue) 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .hero {
+            background: linear-gradient(135deg, #fff 0%, var(--pastel-blue) 100%);
+            color: var(--text-primary);
+            padding: 40px;
+            border-radius: 16px;
+            margin-bottom: 30px;
+            box-shadow: 0 8px 16px var(--shadow-color);
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .hero h1 {
+            margin: 0 0 20px 0;
+            font-size: 2.5em;
+            color: var(--text-primary);
+        }
+
+        .hero p {
+            margin: 0 0 25px 0;
+            opacity: 0.9;
+            font-size: 1.1em;
+            color: var(--text-secondary);
+        }
+
+        .upload-container {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 25px;
+            border-radius: 12px;
+            border: 2px dashed rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            backdrop-filter: blur(10px);
+        }
+
+        .upload-container:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: var(--pastel-blue);
+            transform: translateY(-2px);
+        }
+
+        .upload-container.dragging {
+            background: rgba(255, 255, 255, 0.4);
+            border-color: var(--pastel-green);
+        }
+
+        .upload-container input[type="file"] {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .upload-icon {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .upload-progress {
+            height: 4px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 2px;
+            margin-top: 15px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .upload-progress-bar {
+            height: 100%;
+            background: white;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .status {
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 4px 8px var(--shadow-color);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .success { 
+            background: var(--pastel-green);
+            border-left: 4px solid #81C784;
+        }
+
+        .error { 
+            background: var(--pastel-error);
+            border-left: 4px solid #E57373;
+        }
+
+        pre {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 12px;
+            overflow: auto;
+            box-shadow: 0 4px 8px var(--shadow-color);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: var(--text-primary);
+        }
+
+        .endpoint-info {
+            display: none;
+        }
+
+        .debug-container .endpoint-info {
+            display: block;
+            font-size: 0.9em;
+            color: var(--text-secondary);
+            margin: 5px 0;
+            padding: 8px 12px;
+            background: var(--pastel-blue);
+            border-radius: 8px;
+            opacity: 0.8;
+        }
+
+        .chat-container {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 16px;
+            padding: 25px;
+            box-shadow: 0 8px 16px var(--shadow-color);
+            margin: 20px 0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .input-group {
+            display: flex;
+            gap: 12px;
+            margin: 15px 0;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 14px;
+            border: 2px solid var(--pastel-blue);
+            border-radius: 12px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.9);
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--pastel-purple);
+            box-shadow: 0 0 0 3px rgba(209, 196, 233, 0.3);
+        }
+
+        button {
+            background: linear-gradient(135deg, var(--pastel-purple) 0%, var(--pastel-blue) 100%);
+            color: var(--text-primary);
+            border: none;
+            border-radius: 12px;
+            padding: 14px 28px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px var(--shadow-color);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px var(--shadow-color);
+        }
+
+        button:disabled {
+            background: var(--pastel-blue);
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .thinking {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 12px;
+            background: var(--pastel-yellow);
+            border-radius: 12px;
+            margin: 10px 0;
+        }
+
+        .thinking.visible {
+            display: flex;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--text-primary);
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+            opacity: 0.6;
+        }
+
+        .response-container {
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s ease-out;
+        }
+
+        .response-container.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .debug-container {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 16px;
+            padding: 25px;
+            box-shadow: 0 8px 16px var(--shadow-color);
+            margin-top: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .debug-container h2 {
+            color: var(--text-primary);
+            margin-bottom: 15px;
+            font-size: 1.5em;
+            font-weight: 600;
+            background: linear-gradient(135deg, var(--pastel-purple) 0%, var(--pastel-blue) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: inline-block;
+        }
+
+        .progress-text {
+            margin-top: 12px;
+            font-size: 0.9em;
+            color: var(--text-primary);
+            animation: fade-in 0.3s ease-out;
+        }
+
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.3; }
+            50% { transform: scale(1.2); opacity: 0.8; }
+        }
+
+        h2 {
+            color: var(--text-primary);
+            margin-top: 0;
+            font-weight: 500;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+            z-index: 1000;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px;
+            border-radius: 16px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            z-index: 1001;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .modal-header {
+            margin-bottom: 20px;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: var(--text-primary);
+            font-size: 1.5em;
+            font-weight: 600;
+            background: linear-gradient(135deg, var(--pastel-purple) 0%, var(--pastel-blue) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .modal-content {
+            margin-bottom: 25px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        .modal-button {
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .modal-button.primary {
+            background: linear-gradient(135deg, var(--pastel-purple) 0%, var(--pastel-blue) 100%);
+            color: var(--text-primary);
+        }
+
+        .modal-button.secondary {
+            background: var(--pastel-blue);
+            opacity: 0.8;
+            color: var(--text-primary);
+        }
+
+        .modal-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px var(--shadow-color);
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideIn {
+            from { 
+                opacity: 0;
+                transform: translate(-50%, -60%);
+            }
+            to { 
+                opacity: 1;
+                transform: translate(-50%, -50%);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="hero">
+        <h1>AI Resume Analysis</h1>
+        <p>Upload a resume and chat with our AI to get detailed insights about the candidate</p>
+        <div class="upload-container" id="uploadContainer">
+            <div class="upload-icon">📄</div>
+            <div>Drag & drop your resume here or click to browse</div>
+            <input type="file" id="resumeUpload" accept=".pdf,.doc,.docx" />
+            <div class="upload-progress" id="uploadProgress">
+                <div class="upload-progress-bar" id="uploadProgressBar"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="status" class="status">Ready to analyze resumes</div>
+    
+    <div class="chat-container">
+        <h2>Ask About Candidate</h2>
+        <div class="input-group">
+            <input type="text" id="message" 
+                   placeholder="Ask about the candidate's experience, skills, or qualifications..."
+                   value="What can you tell me about this candidate?" />
+            <button onclick="sendTestMessage()" id="sendButton">Ask</button>
+        </div>
+        
+        <div class="thinking" id="thinking">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+        </div>
+        
+        <h2>Response</h2>
+        <div class="response-container" id="responseContainer">
+            <pre id="response">Upload a resume to start the analysis</pre>
+        </div>
+    </div>
+    
+    <div class="debug-container">
+        <h2>Candidate Info</h2>
+        <div id="endpoint" class="endpoint-info">Endpoint: Not connected</div>
+        <pre id="debug"></pre>
+    </div>
+
+    <!-- Terms and Conditions Modal -->
+    <div class="modal-overlay" id="termsModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Terms and Conditions</h3>
+            </div>
+            <div class="modal-content">
+                <p>By uploading your resume or PDF to our platform, you acknowledge and agree to the following:</p>
+                <ul>
+                    <li>You consent to us storing and processing your data for testing and training purposes.</li>
+                    <li>Your data may be used to improve our AI models and recruitment processes.</li>
+                    <li>We will handle your information in accordance with data protection regulations.</li>
+                    <li>Your data may be retained in our system for future analysis and improvements.</li>
+                </ul>
+                <p>Please confirm that you understand and agree to these terms before proceeding with the upload.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-button secondary" onclick="closeTermsModal()">Cancel</button>
+                <button class="modal-button primary" onclick="acceptTerms()">I Agree</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="./static/agent-bridge.js"></script>
+    <script>
+        // Update API endpoints to use configuration
+        const API_BASE = window.API_CONFIG.BASE_URL || '';
+        
+        // Initialize the bridge when page loads
+        window.onload = async function() {
+            const status = document.getElementById('status');
+            const debug = document.getElementById('debug');
+            const endpoint = document.getElementById('endpoint');
+            
+            try {
+                endpoint.textContent = 'Endpoint: Connecting to AI service...';
+                const success = await window.agentBridge.initialize();
+                if (success) {
+                    status.textContent = 'Ready';
+                    status.className = 'status success';
+                    endpoint.textContent = 'Endpoint: Connected';
+                    
+                    // Show debug info
+                    const data = window.agentBridge.getCandidateData();
+                    debug.textContent = JSON.stringify(data, null, 2);
+                } else {
+                    status.textContent = 'Ready to analyze resumes';
+                    status.className = 'status';
+                    endpoint.textContent = 'Endpoint: Waiting for resume upload...';
+                    debug.textContent = 'Upload a resume to begin analysis';
+                }
+            } catch (error) {
+                status.textContent = 'Ready to analyze resumes';
+                status.className = 'status';
+                endpoint.textContent = 'Endpoint: Waiting for resume upload...';
+                debug.textContent = 'Upload a resume to begin analysis';
+            }
+        };
+
+        // Function to send test message
+        async function sendTestMessage() {
+            const message = document.getElementById('message').value;
+            const response = document.getElementById('response');
+            const endpoint = document.getElementById('endpoint');
+            const thinking = document.getElementById('thinking');
+            const sendButton = document.getElementById('sendButton');
+            const responseContainer = document.getElementById('responseContainer');
+            
+            try {
+                // Disable button and show thinking animation
+                sendButton.disabled = true;
+                thinking.classList.add('visible');
+                responseContainer.classList.remove('visible');
+                endpoint.textContent = 'Endpoint: Processing request...';
+                
+                // Add a small delay to show the thinking animation
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                const result = await window.agentBridge.sendMessage(message);
+                
+                // Add a small delay before showing the response
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                response.textContent = result;
+                endpoint.textContent = 'Endpoint: Response received';
+                
+                // Show response with animation
+                responseContainer.classList.add('visible');
+            } catch (error) {
+                response.textContent = `Please upload a resume first to enable AI analysis.`;
+                endpoint.textContent = 'Endpoint: Waiting for resume upload...';
+                responseContainer.classList.add('visible');
+            } finally {
+                // Hide thinking animation and enable button
+                thinking.classList.remove('visible');
+                sendButton.disabled = false;
+            }
+        }
+
+        // Add enter key support for sending messages
+        document.getElementById('message').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendTestMessage();
+            }
+        });
+
+        // File upload handling
+        const uploadContainer = document.getElementById('uploadContainer');
+        const resumeUpload = document.getElementById('resumeUpload');
+        const uploadProgress = document.getElementById('uploadProgress');
+        const uploadProgressBar = document.getElementById('uploadProgressBar');
+
+        // Drag and drop handling
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadContainer.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadContainer.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadContainer.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            uploadContainer.classList.add('dragging');
+        }
+
+        function unhighlight(e) {
+            uploadContainer.classList.remove('dragging');
+        }
+
+        uploadContainer.addEventListener('drop', handleDrop, false);
+        resumeUpload.addEventListener('change', handleFileSelect, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            if (files.length > 0) {
+                if (!termsAccepted) {
+                    showTermsModal();
+                    // Store files temporarily
+                    resumeUpload.files = files;
+                } else {
+                    handleFiles(files);
+                }
+            }
+        }
+
+        function handleFileSelect(e) {
+            const files = e.target.files;
+            handleFiles(files);
+        }
+
+        async function handleFiles(files) {
+            const file = files[0];
+            if (!file) return;
+
+            // Show progress bar
+            uploadProgress.style.display = 'block';
+            uploadProgressBar.style.width = '0%';
+            
+            // Update endpoint status
+            const endpoint = document.getElementById('endpoint');
+            endpoint.textContent = 'Endpoint: Preparing to analyze resume...';
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // Create XMLHttpRequest for progress tracking
+            const xhr = new XMLHttpRequest();
+            
+            // Update API endpoint to use configuration
+            xhr.open('POST', `${API_BASE}/api/analyze`, true);
+            
+            // Track upload progress
+            xhr.upload.addEventListener('progress', (event) => {
+                if (event.lengthComputable) {
+                    const percentComplete = (event.loaded / event.total) * 100;
+                    uploadProgressBar.style.width = percentComplete + '%';
+                    
+                    // Add progress text to upload container
+                    const progressText = uploadContainer.querySelector('.progress-text') || document.createElement('div');
+                    progressText.className = 'progress-text';
+                    progressText.textContent = `Uploading: ${Math.round(percentComplete)}%`;
+                    endpoint.textContent = 'Endpoint: Uploading resume...';
+                    if (!uploadContainer.querySelector('.progress-text')) {
+                        uploadContainer.appendChild(progressText);
+                    }
+                }
+            });
+
+            // Handle state changes
+            xhr.onreadystatechange = async function() {
+                if (xhr.readyState === 4) {
+                    if (xhr.status === 200) {
+                        try {
+                            const result = JSON.parse(xhr.responseText);
+                            
+                            // Update progress text
+                            const progressText = uploadContainer.querySelector('.progress-text');
+                            if (progressText) {
+                                progressText.textContent = 'Analyzing resume...';
+                            }
+                            endpoint.textContent = 'Endpoint: Analyzing resume...';
+
+                            // Initialize the agent bridge with new data
+                            await window.agentBridge.initialize();
+                            
+                            // Update status
+                            const status = document.getElementById('status');
+                            status.textContent = 'Resume analyzed successfully';
+                            status.className = 'status success';
+                            endpoint.textContent = 'Endpoint: Analysis complete';
+                            
+                            // Update debug info
+                            const debug = document.getElementById('debug');
+                            debug.textContent = JSON.stringify(result, null, 2);
+                            
+                            // Hide progress elements after a delay
+                            setTimeout(() => {
+                                uploadProgress.style.display = 'none';
+                                uploadProgressBar.style.width = '0%';
+                                const progressText = uploadContainer.querySelector('.progress-text');
+                                if (progressText) {
+                                    progressText.remove();
+                                }
+                            }, 1000);
+                        } catch (error) {
+                            handleUploadError('Failed to parse response: ' + error.message);
+                        }
+                    } else {
+                        handleUploadError('Upload failed: ' + xhr.status);
+                    }
+                }
+            };
+
+            // Handle network errors
+            xhr.onerror = () => {
+                handleUploadError('Network error occurred');
+            };
+
+            try {
+                // Send the request
+                xhr.send(formData);
+            } catch (error) {
+                handleUploadError(error.message);
+            }
+        }
+
+        function handleUploadError(errorMessage) {
+            console.error('Upload failed:', errorMessage);
+            const status = document.getElementById('status');
+            status.textContent = `Upload failed: ${errorMessage}`;
+            status.className = 'status error';
+            uploadProgress.style.display = 'none';
+            
+            // Remove progress text if it exists
+            const progressText = uploadContainer.querySelector('.progress-text');
+            if (progressText) {
+                progressText.remove();
+            }
+        }
+
+        // Add styles for progress text
+        const style = document.createElement('style');
+        style.textContent = `
+            .progress-text {
+                margin-top: 10px;
+                font-size: 0.9em;
+                color: rgba(255, 255, 255, 0.9);
+                animation: fade-in 0.3s ease-out;
+            }
+            @keyframes fade-in {
+                from { opacity: 0; transform: translateY(-5px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Terms and Conditions handling
+        let termsAccepted = false;
+        const termsModal = document.getElementById('termsModal');
+
+        function showTermsModal() {
+            termsModal.style.display = 'block';
+            document.body.style.overflow = 'hidden'; // Prevent scrolling
+        }
+
+        function closeTermsModal() {
+            termsModal.style.display = 'none';
+            document.body.style.overflow = 'auto';
+            resumeUpload.value = ''; // Clear the file input
+        }
+
+        function acceptTerms() {
+            termsAccepted = true;
+            termsModal.style.display = 'none';
+            document.body.style.overflow = 'auto';
+            // Proceed with file upload
+            handleFiles(resumeUpload.files);
+        }
+
+        // Modify file handling to check terms acceptance
+        resumeUpload.addEventListener('change', function(e) {
+            if (e.target.files.length > 0) {
+                if (!termsAccepted) {
+                    showTermsModal();
+                } else {
+                    handleFiles(e.target.files);
+                }
+            }
+        });
+
+        // Update all fetch calls to use API_BASE
+        window.agentBridge = {
+            // ... existing bridge code ...
+            initialize: async function() {
+                try {
+                    const response = await fetch(`${API_BASE}/api/latest-analysis`);
+                    // ... rest of initialize function ...
+                } catch (error) {
+                    console.error('Error initializing:', error);
+                    return false;
+                }
+            },
+            
+            sendMessage: async function(message) {
+                try {
+                    const response = await fetch(`${API_BASE}/api/agent/proxy-chat`, {
+                        // ... existing options ...
+                    });
+                    // ... rest of sendMessage function ...
+                } catch (error) {
+                    console.error('Error sending message:', error);
+                    throw error;
+                }
+            }
+            // ... rest of bridge code ...
+        };
+    </script>
+</body>
+</html> 

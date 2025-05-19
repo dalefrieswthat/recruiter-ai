@@ -1,0 +1,45 @@
+{
+    "spec": {
+        "title": "Senior Software Engineer",
+        "department": "Engineering",
+        "description": "We are looking for a Senior Software Engineer with strong experience in Python, cloud technologies, and modern software development practices.",
+        "requiredSkills": {
+            "programmingLanguages": {
+                "Python": 8,
+                "JavaScript": 7
+            },
+            "frameworks": {
+                "FastAPI": 7,
+                "React": 6
+            },
+            "cloudAndDevOps": {
+                "AWS": 8,
+                "Docker": 7,
+                "Kubernetes": 6
+            },
+            "tools": {
+                "Git": 8,
+                "CI/CD": 7
+            }
+        },
+        "requiredExperience": {
+            "level": "Senior",
+            "years": 5
+        },
+        "requiredEducation": {
+            "minimumDegree": "Bachelor",
+            "preferredFields": ["Computer Science", "Software Engineering", "Information Technology"]
+        },
+        "culturalRequirements": {
+            "teamOrientation": 8,
+            "communication": 8,
+            "leadership": 7
+        },
+        "scoringWeights": {
+            "technicalSkills": 0.4,
+            "experience": 0.3,
+            "education": 0.2,
+            "culturalFit": 0.1
+        }
+    }
+} 

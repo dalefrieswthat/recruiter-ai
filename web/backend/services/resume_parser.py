@@ -51,9 +51,42 @@ class ResumeParser:
         # Split content into lines and clean them
         lines = [line.strip() for line in resume_content.split('\n') if line.strip()]
 
-        # Extract name (usually first line)
-        if lines:
-            structured_data["name"] = lines[0]
+        # Extract name using multiple approaches
+        name_found = False
+        
+        # Common name section indicators
+        name_headers = ['name:', 'full name:', 'candidate:', 'applicant:']
+        
+        # First try to find name with explicit header
+        for i, line in enumerate(lines[:10]):  # Check first 10 lines
+            line_lower = line.lower()
+            for header in name_headers:
+                if line_lower.startswith(header):
+                    # Extract name after the header
+                    name = line[len(header):].strip()
+                    if name:
+                        structured_data["name"] = name
+                        name_found = True
+                        break
+            if name_found:
+                break
+
+        # If no name found with header, try to identify name by pattern
+        if not name_found:
+            # Look for a name-like pattern in the first few lines
+            name_pattern = r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+$'  # Matches "FirstName LastName" pattern
+            for line in lines[:5]:  # Check first 5 lines
+                if re.match(name_pattern, line):
+                    structured_data["name"] = line
+                    name_found = True
+                    break
+
+        # If still no name found, use first line as fallback
+        if not name_found and lines:
+            # Remove common resume headers if present
+            first_line = lines[0]
+            if first_line.lower() not in ['resume', 'curriculum vitae', 'cv']:
+                structured_data["name"] = first_line
 
         # Extract email and phone
         email_pattern = r'[\w\.-]+@[\w\.-]+\.\w+'
@@ -72,23 +105,41 @@ class ResumeParser:
 
         # Extract education
         education_section = False
-        for line in lines:
+        education_entries = []
+        current_edu = {}
+        for i, line in enumerate(lines):
+            # Start of education section
             if re.search(r'education|university|college|degree|bachelor|master|phd', line.lower()):
                 education_section = True
                 continue
-            
             if education_section:
+                # End of education section
                 if re.search(r'experience|work|employment|skills|projects', line.lower()):
                     education_section = False
+                    if current_edu:
+                        education_entries.append(current_edu)
+                        current_edu = {}
                     continue
-                
-                # Try to extract education details
-                if re.search(r'\d{4}', line):  # Year pattern
-                    structured_data["education"].append({
-                        "degree": line,
-                        "school": "",
-                        "year": re.search(r'\d{4}', line).group(0)
-                    })
+                # Try to extract degree
+                degree_match = re.search(r'(Bachelor|B\.S\.|BS|Master|M\.S\.|MS|PhD|Doctor|Associate|Bachelors|Masters|BA|MA|MBA|JD|MD)', line, re.IGNORECASE)
+                if degree_match:
+                    current_edu['degree'] = degree_match.group(0)
+                # Try to extract school/university
+                school_match = re.search(r'(University|College|Institute|School|Academy|Polytechnic|State University|Tech)', line, re.IGNORECASE)
+                if school_match:
+                    current_edu['school'] = line.strip()
+                # Try to extract year
+                year_match = re.search(r'(19|20)\d{2}', line)
+                if year_match:
+                    current_edu['year'] = year_match.group(0)
+                # If we have at least degree and year, consider this a complete entry
+                if 'degree' in current_edu and 'year' in current_edu:
+                    education_entries.append(current_edu)
+                    current_edu = {}
+        # Add any remaining entry
+        if current_edu:
+            education_entries.append(current_edu)
+        structured_data['education'] = education_entries
 
         # Extract experience
         experience_section = False

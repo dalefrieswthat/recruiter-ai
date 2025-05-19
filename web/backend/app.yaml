@@ -28,4 +28,14 @@ services:
     type: SECRET
   - key: DO_AI_AGENT_ID
     scope: RUN_TIME
-    type: SECRET 
+    type: SECRET
+  # LLaMA Configuration
+  - key: LLAMA_API_URL
+    scope: RUN_TIME
+    type: SECRET
+  - key: USE_LLAMA
+    scope: RUN_TIME
+    value: "true"
+  - key: LLAMA_MODEL
+    scope: RUN_TIME
+    value: "7B" 

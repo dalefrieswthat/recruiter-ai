@@ -28,7 +28,7 @@ class AIService:
         logger.info(f"AIService initialized with agent ID: {self.agent_id}")
         logger.info(f"API URL: {self.api_url}")
         logger.info(f"Use mock: {self.use_mock}")
-        
+
     async def get_auth_token(self) -> str:
         """
         Get an authentication token for the AI agent with caching.
@@ -362,277 +362,95 @@ class AIService:
         """
         Analyze a resume using the DigitalOcean AI agent.
         """
-        # First check if the agent is healthy
+        try:
+            # Only use DigitalOcean agent for analysis
+            analysis = await self._analyze_with_agent(resume_content)
+            # Optionally, you can add fallback name extraction here if needed
+            if 'candidate_name' not in analysis:
+                analysis['candidate_name'] = "Not Provided"
+            return analysis
+        except Exception as e:
+            logger.error(f"Error in analyze_candidate: {str(e)}")
+            if self.use_mock:
+                return self._get_mock_analysis()
+            raise
+
+    async def _analyze_with_agent(self, resume_content: str) -> Dict[str, Any]:
+        """
+        Internal method to get analysis from DigitalOcean agent.
+        """
+        # Check agent health
         if not await self.check_health() and not self.use_mock:
             raise Exception("AI agent is not healthy or accessible")
             
-        # Use mock data if in mock mode
         if self.use_mock:
-            return {
-                "overall_fit_score": 85,
-                "technical_skills": {
-                    "Python": 90,
-                    "JavaScript": 80,
-                    "React": 75,
-                    "AWS": 85,
-                    "Database": 80
-                },
-                "experience_level": "Senior",
-                "education": 90,
-                "cultural_fit": 85,
-                "interview_recommendation": "Candidate shows strong technical skills and relevant experience. Proceed to technical interview."
-            }
+            return self._get_mock_analysis()
 
         try:
-            logger.info("Sending resume for AI analysis")
-            
-            # Get auth token
-            auth_token = await self.get_auth_token()
-            
             headers = {
-                "Authorization": f"Bearer {auth_token}",
+                "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json"
             }
 
-            # Prepare a shorter resume content to avoid token limits
-            short_resume = resume_content[:3000] if len(resume_content) > 3000 else resume_content
-            logger.info(f"Using resume content of length: {len(short_resume)}")
-
-            payload = {
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You are a resume analysis assistant. Analyze the provided resume and extract key information."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Please analyze this resume and provide a structured response with the following information:\n\n1. Overall fit score (0-100)\n2. Technical skills assessment with scores\n3. Experience level evaluation\n4. Education assessment\n5. Cultural fit analysis\n\nFormat the response as a JSON object with these fields:\n- overall_fit_score: number\n- technical_skills: object with skill scores\n- experience_level: string\n- education: number\n- cultural_fit: number\n\nResume content:\n\n{short_resume}"
-                    }
-                ],
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "max_tokens": 1000,
-                "stream": False
-            }
-
-            logger.info("Sending API request to analyze candidate")
-            try:
-                # Increase timeout to 60 seconds to avoid timeouts
-                response = requests.post(self.api_url, headers=headers, json=payload, timeout=60)
-                
-                if response.status_code != 200:
-                    logger.error(f"AI agent returned error: {response.status_code}")
-                    logger.error(f"Response content: {response.text}")
-                    
-                    # Fall back to generated data if the agent fails
-                    logger.info("Falling back to generated analysis data")
-                    return self._generate_fallback_analysis(short_resume)
-                    
-                response_data = response.json()
-                logger.info("Successfully received AI response")
-                
-                # Parse the response content
-                content = response_data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
-                logger.info(f"Response content: {content[:200]}...")  # Log first 200 chars
-                
-                # Try to parse as JSON
-                try:
-                    # More robust JSON extraction
-                    json_content = self._extract_json_from_text(content)
-                    if json_content:
-                        analysis_result = json.loads(json_content)
-                        logger.info("Successfully parsed AI response as JSON")
-                        return analysis_result
-                    else:
-                        logger.error("Failed to extract JSON from response")
-                        # Try backup methods
-                        return self._extract_analysis_from_text(content) or self._generate_fallback_analysis(short_resume)
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse AI response as JSON: {str(e)}")
-                    # Try eval as fallback
-                    try:
-                        analysis_result = eval(content)
-                        logger.info("Successfully parsed AI response with eval")
-                        return analysis_result
-                    except:
-                        logger.error("Failed to parse AI response with eval")
-                        return self._generate_fallback_analysis(short_resume)
-            except requests.exceptions.Timeout:
-                logger.error("Timeout connecting to AI agent")
-                return self._generate_fallback_analysis(short_resume)
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Error connecting to AI agent: {str(e)}")
-                return self._generate_fallback_analysis(short_resume)
-        except Exception as e:
-            logger.error(f"Error in analyze_candidate: {str(e)}")
-            return self._generate_fallback_analysis(short_resume)
-    
-    def _extract_json_from_text(self, text: str) -> str:
-        """
-        Extract JSON from text that might be wrapped in markdown code blocks.
-        Returns the extracted JSON string or empty string if not found.
-        """
-        # Try to find JSON in code blocks
-        json_pattern = r"```(?:json)?([\s\S]*?)```"
-        matches = re.findall(json_pattern, text)
-        
-        if matches:
-            # Use the first match (assumming it's the most relevant)
-            json_str = matches[0].strip()
-            logger.info(f"Found JSON in code block, length: {len(json_str)}")
-            return json_str
-        
-        # If no code blocks found, try to find anything that looks like JSON
-        # Look for content between curly braces, assuming it might be JSON
-        if text.strip().startswith("{") and "}" in text:
-            start_idx = text.find("{")
-            # Find the matching closing brace
-            brace_count = 0
-            for i in range(start_idx, len(text)):
-                if text[i] == "{":
-                    brace_count += 1
-                elif text[i] == "}":
-                    brace_count -= 1
-                    if brace_count == 0:
-                        end_idx = i + 1
-                        json_str = text[start_idx:end_idx].strip()
-                        logger.info(f"Found JSON-like content, length: {len(json_str)}")
-                        return json_str
-        
-        logger.warning("No JSON found in text")
-        return ""
-
-    def _extract_analysis_from_text(self, text: str) -> Dict[str, Any]:
-        """
-        Extract analysis information from text that might not be proper JSON.
-        """
-        try:
-            logger.info("Attempting to extract analysis from text")
-            result = {
-                "overall_fit_score": 0,
-                "technical_skills": {},
-                "experience_level": "Unknown",
-                "education": 0,
-                "cultural_fit": 0
-            }
-            
-            # Try to extract overall score
-            score_patterns = [
-                r"overall[_\s]?(?:fit_)?score[:\s]*(\d+)",
-                r"overall[_\s]?(?:fit)?[:\s]*(\d+)",
-                r"score[:\s]*(\d+)"
+            # Prepare the chat message for analysis
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are an expert resume analyzer. Analyze the provided resume and extract key information."
+                },
+                {
+                    "role": "user",
+                    "content": f"Please analyze this resume and provide structured information:\n\n{resume_content}"
+                }
             ]
-            
-            for pattern in score_patterns:
-                score_match = re.search(pattern, text, re.IGNORECASE)
-                if score_match:
-                    result["overall_fit_score"] = int(score_match.group(1))
-                    logger.info(f"Extracted overall score: {result['overall_fit_score']}")
-                    break
-            
-            # Try to extract experience level
-            experience_patterns = [
-                r"experience[_\s]?level[:\s]*[\"']?(\w+)[\"']?",
-                r"seniority[:\s]*[\"']?(\w+)[\"']?",
-                r"level[:\s]*[\"']?(\w+)[\"']?"
-            ]
-            
-            for pattern in experience_patterns:
-                exp_match = re.search(pattern, text, re.IGNORECASE)
-                if exp_match:
-                    result["experience_level"] = exp_match.group(1)
-                    logger.info(f"Extracted experience level: {result['experience_level']}")
-                    break
-            
-            # Extract technical skills if possible
-            skills_section = None
-            if "technical_skills" in text.lower():
-                skills_idx = text.lower().find("technical_skills")
-                if skills_idx > 0:
-                    # Try to find a section that might contain skills
-                    skills_section = text[skills_idx:skills_idx+500]  # Look at next 500 chars
-            
-            if skills_section:
-                # Look for common programming languages and assign scores
-                common_langs = ["Python", "Java", "JavaScript", "C#", "C++", "TypeScript", "SQL", "Go"]
-                for lang in common_langs:
-                    if lang in skills_section:
-                        # Try to find a score near the language name
-                        score_match = re.search(f"{lang}[:\s]*(\d+)", skills_section)
-                        if score_match:
-                            score = int(score_match.group(1))
-                            if "programming_languages" not in result["technical_skills"]:
-                                result["technical_skills"]["programming_languages"] = {}
-                            result["technical_skills"]["programming_languages"][lang] = score
-            
-            logger.info(f"Extracted skills: {result['technical_skills']}")
-            return result
-        except Exception as e:
-            logger.error(f"Error extracting analysis from text: {str(e)}")
-            return None
 
-    def _generate_fallback_analysis(self, resume_content: str) -> Dict[str, Any]:
+            response = requests.post(
+                self.api_url,
+                headers=headers,
+                json={
+                    "messages": messages,
+                    "temperature": 0.1,
+                    "max_tokens": 1000
+                }
+            )
+
+            if response.status_code == 200:
+                return self._parse_agent_response(response.json())
+            else:
+                raise Exception(f"Agent API error: {response.status_code} - {response.text}")
+
+        except Exception as e:
+            logger.error(f"Error in _analyze_with_agent: {str(e)}")
+            raise
+
+    def _get_mock_analysis(self) -> Dict[str, Any]:
         """
-        Generate a reasonable fallback analysis when the AI agent fails.
-        This is better than a generic template since it's based on the resume content.
+        Return mock analysis data for testing.
         """
-        logger.info("Generating fallback analysis from resume content")
-        
-        # Default values
-        analysis = {
-            "overall_fit_score": 92,
+        return {
+            "overall_fit_score": 85,
+            "candidate_name": "John Doe",
             "technical_skills": {
-                "programming_languages": {},
-                "frameworks": {},
-                "cloud_and_devops": {},
-                "tools": {}
+                "Python": 90,
+                "JavaScript": 80,
+                "React": 75,
+                "AWS": 85,
+                "Database": 80
             },
             "experience_level": "Senior",
-            "education": 8,
-            "cultural_fit": 85
+            "education": 90,
+            "cultural_fit": 85,
+            "interview_recommendation": "Strong candidate with relevant experience."
         }
-        
-        # Look for programming languages in the resume
-        languages = ["Python", "Java", "JavaScript", "C#", "C++", "Ruby", "Go", "TypeScript", 
-                     "PHP", "Swift", "Kotlin", "Rust", "Scala", "Perl", "R"]
-        
-        for lang in languages:
-            if lang.lower() in resume_content.lower():
-                # Assign a score based on approximate prevalence
-                mentions = resume_content.lower().count(lang.lower())
-                score = min(9, 5 + mentions)
-                analysis["technical_skills"]["programming_languages"][lang] = score
-        
-        # Look for frameworks
-        frameworks = ["React", "Angular", "Vue", "Spring", "Django", ".NET", "Flask", "Express", 
-                      "Rails", "Laravel", "Symfony", "Bootstrap", "jQuery"]
-        
-        for framework in frameworks:
-            if framework.lower() in resume_content.lower():
-                mentions = resume_content.lower().count(framework.lower())
-                score = min(9, 6 + mentions)
-                analysis["technical_skills"]["frameworks"][framework] = score
-        
-        # Look for cloud & devops terms
-        cloud_devops = ["AWS", "Azure", "GCP", "Docker", "Kubernetes", "Terraform", "Jenkins", 
-                        "CI/CD", "DevOps", "GitLab", "GitHub", "Bitbucket", "CircleCI", "CloudFormation"]
-        
-        for term in cloud_devops:
-            if term.lower() in resume_content.lower() or term in resume_content:
-                mentions = max(1, resume_content.lower().count(term.lower()))
-                score = min(9, 6 + mentions)
-                analysis["technical_skills"]["cloud_and_devops"][term] = score
-        
-        # Look for tools
-        tools = ["Git", "JIRA", "Confluence", "Slack", "Teams", "VS Code", "IntelliJ", "PyCharm",
-                 "Eclipse", "Unix", "Linux", "Windows", "macOS"]
-        
-        for tool in tools:
-            if tool.lower() in resume_content.lower():
-                score = min(9, 6 + resume_content.lower().count(tool.lower()))
-                analysis["technical_skills"]["tools"][tool] = score
-        
-        return analysis
+
+    def _parse_agent_response(self, response_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Parse the response from the DigitalOcean agent and return structured analysis.
+        """
+        # Implement the logic to parse the response and return structured analysis
+        # This is a placeholder and should be replaced with the actual implementation
+        # based on the response format from the DigitalOcean agent
+        return response_data
 
     async def set_agent_memory(self, data: Dict[str, Any]) -> bool:
         """

@@ -14,12 +14,18 @@ from dotenv import load_dotenv, find_dotenv
 from services.resume_parser import ResumeParser
 from services.ai_service import AIService
 from services.storage_service import StorageService
+from services.embedding_service import EmbeddingService
+from services.job_scoring_service import JobScoringService
 import asyncio
 import tempfile
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Define the analysis cache file path
+ANALYSIS_CACHE_FILE = Path(__file__).parent / "analysis_cache.json"
 
 # Try to load environment variables from multiple possible locations
 env_paths = [
@@ -105,14 +111,17 @@ for var, default_func in optional_env_vars.items():
 
 # Initialize services
 resume_parser = ResumeParser()
-ai_service = AIService(use_mock=False)  # Use real AI agent
+ai_service = AIService(use_mock=False)
 storage_service = StorageService()
+embedding_service = EmbeddingService()
+job_scoring_service = JobScoringService()
 
 # In-memory cache for analysis data
 analysis_cache = {
     'latest': None,  # Latest analysis
     'history': [],   # Keep last 5 analyses for reference
-    'timestamp': None  # When the latest analysis was stored
+    'timestamp': None,  # When the latest analysis was stored
+    'embeddings': {}  # Store embeddings for the latest analysis
 }
 
 def save_analysis_to_cache(analysis_data):
@@ -261,169 +270,70 @@ async def send_data_to_agent(analysis_data):
         logger.error(f"Error in send_data_to_agent: {str(e)}")
         return False
 
-@app.post("/api/analyze", response_model=CandidateResponse)
-async def analyze_candidate(file: UploadFile = File(...)):
-    global analysis_cache
+@app.post("/api/analyze")
+async def analyze_candidate(file: UploadFile = File(...), job_requirement: Optional[str] = None):
+    """
+    Analyze a candidate's resume and calculate their fit score for a specific role if provided.
+    """
     try:
-        logger.info(f"Processing file: {file.filename}")
+        # Read and parse the resume
+        resume_content = await file.read()
+        logging.warning(f"[DEBUG] resume_content type: {type(resume_content)}")
+        logging.warning(f"[DEBUG] job_requirement type: {type(job_requirement)}")
+        logging.warning(f"[DEBUG] job_requirement value: {job_requirement}")
         
-        # Read file content
-        content = await file.read()
-        logger.info(f"Read {len(content)} bytes from file")
+        # Parse the PDF and extract text
+        resume_text = await resume_parser.parse_resume(resume_content)
         
-        # Upload to DigitalOcean Spaces
-        try:
-            storage_result = await storage_service.upload_resume(content, file.filename)
-            logger.info(f"Successfully uploaded file to storage: {storage_result['key']}")
-        except Exception as e:
-            logger.error(f"Failed to upload file to storage: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Storage error: {str(e)}")
+        # Extract structured data and analyze
+        structured_data = await resume_parser.extract_structured_data(resume_text)
+        analysis = await ai_service.analyze_candidate(resume_text)
         
-        # Parse resume
-        try:
-            resume_content = await resume_parser.parse_resume(content)
-            logger.info(f"Successfully parsed resume. Content length: {len(resume_content)}")
-        except Exception as e:
-            logger.error(f"Failed to parse resume: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Parsing error: {str(e)}")
+        # If job requirement is provided, calculate role-specific score
+        role_specific_score = None
+        if job_requirement:
+            try:
+                # Parse job requirement JSON
+                job_req_data = json.loads(job_requirement)
+                # Calculate role-specific score
+                role_specific_score = job_scoring_service.calculate_role_specific_score(
+                    {"analysis": analysis, "structured_data": structured_data},
+                    job_req_data
+                )
+            except Exception as e:
+                logger.error(f"Error calculating role-specific score: {str(e)}")
+                # Continue with general analysis if role-specific scoring fails
         
-        # Get structured data
-        try:
-            structured_data = await resume_parser.extract_structured_data(resume_content)
-            logger.info("Successfully extracted structured data")
-        except Exception as e:
-            logger.error(f"Failed to extract structured data: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Data extraction error: {str(e)}")
-        
-        # Analyze candidate
-        try:
-            analysis = await ai_service.analyze_candidate(resume_content)
-            logger.info("Successfully analyzed candidate")
-        except Exception as e:
-            logger.error(f"Failed to analyze candidate: {str(e)}")
-            # Use fallback data
-            analysis = {
-                "overall_fit_score": 90,
-                "technical_skills": {
-                    "programming_languages": {
-                        "Python": 8,
-                        "Java": 8,
-                        "JavaScript": 7
-                    },
-                    "frameworks": {
-                        "Spring Boot": 8,
-                        ".NET Core": 7,
-                        "React": 7
-                    },
-                    "cloud_devops": {
-                        "AWS": 8,
-                        "Azure": 8,
-                        "Docker": 7,
-                        "Kubernetes": 7
-                    },
-                    "tools": {
-                        "Git": 8,
-                        "JIRA": 7
-                    }
-                },
-                "experience_level": "Senior",
-                "education": 8,
-                "cultural_fit": 85
-            }
-            logger.info("Using fallback analysis data")
-        
-        # Generate interview questions
-        try:
-            interview_questions = await ai_service.generate_interview_questions(structured_data)
-            logger.info("Successfully generated interview questions")
-        except Exception as e:
-            logger.error(f"Failed to generate interview questions: {str(e)}")
-            # Use fallback questions
-            interview_questions = {
-                "technicalQuestions": [
-                    "How do you approach migrating applications to a cloud-based infrastructure?",
-                    "Can you explain your experience with containerization using Docker?",
-                    "How do you ensure high availability in applications?",
-                    "What is your experience with infrastructure as code tools like Terraform?",
-                    "How do you approach security in your applications?"
-                ],
-                "behavioralQuestions": [
-                    "Tell me about a time when you led a challenging project.",
-                    "How do you handle disagreements with team members?",
-                    "Can you describe a situation where you had to learn a new technology quickly?",
-                    "How do you prioritize tasks when working on multiple projects?",
-                    "Tell me about a time when you had to work under pressure to meet a deadline."
-                ],
-                "culturalFitQuestions": [
-                    "What type of work environment helps you thrive?",
-                    "How do you contribute to a positive team culture?",
-                    "What values are most important to you in a company?",
-                    "How do you approach learning and professional development?",
-                    "How do you handle feedback and criticism?"
-                ]
-            }
-            logger.info("Using fallback interview questions")
-        
-        # Get interview schedule
-        try:
-            interview_schedule = await ai_service.schedule_interview(structured_data)
-            logger.info("Successfully generated interview schedule")
-        except Exception as e:
-            logger.error(f"Failed to generate interview schedule: {str(e)}")
-            # Use fallback schedule
-            interview_schedule = {
-                "recommendedDuration": "60-90 minutes",
-                "suggestedTimeSlots": [
-                    "Monday at 10:00 AM - 11:30 AM",
-                    "Tuesday at 2:00 PM - 3:30 PM",
-                    "Wednesday at 11:00 AM - 12:30 PM"
-                ],
-                "interviewType": "Technical Interview"
-            }
-            logger.info("Using fallback interview schedule")
-        
-        # Create the response
-        response = CandidateResponse(
+        # Create a CandidateResponse object
+        candidate_response = CandidateResponse(
             analysis=analysis,
-            interview_questions=interview_questions,
-            interview_schedule=interview_schedule,
             structured_data=structured_data,
-            resume_url=storage_result['url'],
-            resume_key=storage_result['key']
+            interview_questions={},  # Will be populated later if needed
+            interview_schedule={},   # Will be populated later if needed
+            resume_url="",           # Will be populated if file is stored
+            resume_key=""            # Will be populated if file is stored
         )
         
-        # Store in memory cache
-        analysis_cache['latest'] = response
-        analysis_cache['timestamp'] = time.time()
-        analysis_cache['history'].append(response)
+        # Store in analysis cache
+        analysis_cache['latest'] = candidate_response
+        
+        # Update history
+        analysis_cache['history'].append(candidate_response)
         if len(analysis_cache['history']) > 5:
-            analysis_cache['history'].pop(0)  # Keep only last 5
+            analysis_cache['history'].pop(0)
         
-        logger.info("Stored analysis in memory cache")
+        # Save to cache file
+        save_analysis_to_cache(candidate_response)
         
-        # Send data directly to the agent's API
-        logger.info("Sending candidate data to DigitalOcean agent...")
-        agent_data_sent = await send_data_to_agent(response)
-        if agent_data_sent:
-            logger.info("Successfully sent analysis data to DigitalOcean agent API via direct method")
-        else:
-            logger.warning("Failed to send analysis data to DigitalOcean agent API via direct method")
-        
-        # Also try sending data to the agent's memory via AI service
-        try:
-            logger.info("Sending candidate data to DigitalOcean agent via AI service...")
-            memory_set = await ai_service.set_agent_memory(response.dict())
-            if memory_set:
-                logger.info("Successfully set agent memory with candidate data via AI service method")
-            else:
-                logger.warning("Failed to set agent memory via AI service method, but continuing with analysis")
-        except Exception as e:
-            logger.error(f"Error setting agent memory via AI service: {e}")
-        
-        return response
+        return {
+            "status": "success",
+            "analysis": analysis,
+            "structured_data": structured_data,
+            "role_specific_score": role_specific_score
+        }
         
     except Exception as e:
-        logger.error(f"Unexpected error in analyze_candidate: {e}", exc_info=True)
+        logger.error(f"Error in analyze_candidate: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/latest-analysis")
@@ -1168,9 +1078,18 @@ async def push_data_to_agent_endpoint():
             "message": "No analysis data available to send"
         }
     
+    # Convert CandidateResponse to dict for the agent
+    candidate_data = analysis_cache['latest'].dict()
+    
     # Try both methods of sending data to maximize chances of success
-    agent_chat_success = await send_data_to_agent(analysis_cache['latest'])
-    ai_service_success = await ai_service.set_agent_memory(analysis_cache['latest'].dict())
+    agent_chat_success = await send_data_to_agent(candidate_data)
+    ai_service_success = await ai_service.set_agent_memory(candidate_data)
+    
+    agent_details = {
+        "agent_id": ai_service.agent_id,
+        "agent_url": ai_service.base_url,
+        "api_url": ai_service.api_url
+    }
     
     if agent_chat_success or ai_service_success:
         return {
@@ -1178,23 +1097,22 @@ async def push_data_to_agent_endpoint():
             "message": "Data successfully sent to agent via chat API",
             "direct_method_success": agent_chat_success,
             "ai_service_method_success": ai_service_success,
-            "agent_id": os.getenv('DO_AI_AGENT_ID'),
-            "agent_url": os.getenv('DO_AI_AGENT_URL')
+            "agent_details": agent_details,
+            "candidate_score": candidate_data['analysis'].get("overall_fit_score", 0)
         }
     else:
         # Store the score in memory as a fallback if both API methods fail
         global candidate_score
-        candidate_score = analysis_cache['latest'].analysis.get("overall_fit_score", 0)
+        candidate_score = candidate_data['analysis'].get("overall_fit_score", 0)
         
         # Troubleshooting information for debugging
         return {
             "status": "error",
             "message": "Failed to send data to agent via chat API",
-            "agent_id": os.getenv('DO_AI_AGENT_ID'),
-            "agent_url": os.getenv('DO_AI_AGENT_URL'),
+            "agent_details": agent_details,
             "fallback": "Score stored in memory for API endpoints",
             "score": candidate_score,
-            "note": "Make sure DO_AI_AGENT_ID and DIGITALOCEAN_TOKEN are correctly set in .env file"
+            "note": "Check that the API key and agent ID are correct"
         }
 
 @app.get("/api/agent/test-connection")
@@ -1578,10 +1496,13 @@ async def proxy_chat_to_agent(request: Request):
             
         logger.info(f"Formatted data summary: {formatted_data.get('summary', 'No summary generated')}")
         
-        # Create a clear system message
+        # Create a clear system message that encourages natural language responses
         system_message = (
             "You are a recruiter assistant that helps analyze candidate resumes. "
-            "Use the following candidate data to answer questions accurately. "
+            "Use the following candidate data to answer questions accurately and conversationally. "
+            "Provide responses in natural, conversational language rather than structured formats. "
+            "When discussing the candidate's qualifications, experience, or skills, explain them in a clear, "
+            "engaging way that would be helpful for a recruiter. "
             "The data includes scores, skills, education, and experience information."
         )
         
@@ -1632,15 +1553,15 @@ async def proxy_chat_to_agent(request: Request):
                     },
                     {
                         "role": "assistant",
-                        "content": "I understand. I have access to the candidate data and will use it to answer your questions."
+                        "content": "I understand. I have access to the candidate data and will provide natural, conversational responses about their qualifications and experience."
                     },
                     {
                         "role": "user",
                         "content": message
                     }
                 ],
-                "temperature": 0.1,
-                "max_tokens": 500,
+                "temperature": 0.7,  # Increased temperature for more natural responses
+                "max_tokens": 1000,  # Increased max tokens for more detailed responses
                 "stream": stream
             }
             
@@ -1771,6 +1692,130 @@ async def get_logs():
     except Exception as e:
         logger.error(f"Error getting logs: {str(e)}")
         return {"error": f"Failed to get logs: {str(e)}"}
+
+@app.get("/api/agent/chat")
+async def chat_with_agent(request: Request, query: str):
+    """Chat with the agent about the candidate using embeddings for context."""
+    if not analysis_cache['latest']:
+        return JSONResponse(
+            content={"error": "No candidate data available"},
+            status_code=404
+        )
+    
+    try:
+        # Get the latest resume embeddings
+        latest_key = list(analysis_cache['embeddings'].keys())[-1] if analysis_cache['embeddings'] else None
+        if latest_key:
+            embedding_data = analysis_cache['embeddings'][latest_key]
+            
+            # Add the relevant context to the query
+            context = f"Based on the candidate's resume: {embedding_data['text'][:500]}...\n\n"
+            enhanced_query = context + query
+            
+            # Send to agent
+            response = await ai_service.chat_with_agent(enhanced_query)
+            return JSONResponse(content=response)
+        else:
+            # Fallback to regular chat if no embeddings available
+            response = await ai_service.chat_with_agent(query)
+            return JSONResponse(content=response)
+            
+    except Exception as e:
+        logger.error(f"Error in chat endpoint: {str(e)}")
+        return JSONResponse(
+            content={"error": "Failed to process chat request"},
+            status_code=500
+        )
+
+@app.get("/api/job-requirements")
+async def get_job_requirements():
+    """
+    Get all available job requirements.
+    """
+    try:
+        # In a real implementation, this would fetch from Kubernetes
+        # For now, return mock data
+        return {
+            "status": "success",
+            "requirements": [
+                {
+                    "title": "Senior Software Engineer",
+                    "department": "Engineering",
+                    "requiredSkills": {
+                        "programmingLanguages": {
+                            "Python": 8,
+                            "JavaScript": 7
+                        },
+                        "frameworks": {
+                            "React": 7,
+                            "Django": 7
+                        },
+                        "cloudAndDevOps": {
+                            "AWS": 7,
+                            "Docker": 6
+                        }
+                    },
+                    "requiredExperience": {
+                        "level": "Senior",
+                        "years": 5
+                    },
+                    "requiredEducation": {
+                        "minimumDegree": "Bachelor",
+                        "preferredFields": ["Computer Science", "Software Engineering"]
+                    },
+                    "scoringWeights": {
+                        "technicalSkills": 0.4,
+                        "experience": 0.3,
+                        "education": 0.2,
+                        "culturalFit": 0.1
+                    }
+                }
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error getting job requirements: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/candidate/role-score/{job_title}")
+async def get_role_specific_score(job_title: str):
+    """
+    Get a candidate's score for a specific role.
+    """
+    try:
+        if not analysis_cache['latest']:
+            raise HTTPException(status_code=404, detail="No candidate data available")
+        
+        # In a real implementation, this would fetch the job requirement from Kubernetes
+        # For now, use mock data
+        job_requirement = {
+            "title": job_title,
+            "department": "Engineering",
+            "requiredSkills": {
+                "programmingLanguages": {
+                    "Python": 8,
+                    "JavaScript": 7
+                }
+            },
+            "requiredExperience": {
+                "level": "Senior",
+                "years": 5
+            }
+        }
+        
+        # Calculate role-specific score
+        score = job_scoring_service.calculate_role_specific_score(
+            analysis_cache['latest'],
+            job_requirement
+        )
+        
+        return {
+            "status": "success",
+            "score": score
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting role-specific score: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
